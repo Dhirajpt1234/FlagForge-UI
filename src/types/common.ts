@@ -1,7 +1,14 @@
 export interface User {
   id: string;
   email: string;
-  name: string;
+  firstName?: string;
+  lastName?: string;
+  avatarUrl?: string;
+  phoneNumber?: string;
+  timezone?: string;
+  locale: string;
+  isActive: boolean;
+  lastLoginAt?: string;
   role?: string;
   createdAt?: string;
   updatedAt?: string;

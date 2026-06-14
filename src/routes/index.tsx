@@ -4,6 +4,7 @@ import { Box, CircularProgress } from '@mui/material';
 
 const Auth = lazy(() => import('../pages/Auth'));
 const Dashboard = lazy(() => import('../pages/Dashboard'));
+const ForgotPassword = lazy(() => import('../pages/ForgotPassword'));
 
 const LoadingFallback = () => (
   <Box
@@ -24,6 +25,8 @@ const AppRoutes: React.FC = () => {
       <Suspense fallback={<LoadingFallback />}>
         <Routes>
           <Route path="/" element={<Auth />} />
+          <Route path="/login" element={<Auth />} />
+          <Route path="/forgot-password" element={<ForgotPassword />} />
           <Route path="/dashboard" element={<Dashboard />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
