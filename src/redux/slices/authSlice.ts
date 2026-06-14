@@ -1,5 +1,7 @@
 import { createSlice, createAsyncThunk } from '@reduxjs/toolkit';
 import { authApi } from '../../services/authApi';
+import { storageService } from '../../services/storageService';
+import { cookieService } from '../../services/cookieService';
 import type { User, Organization } from '../../types';
 
 interface AuthState {
@@ -24,10 +26,28 @@ const initialState: AuthState = {
 
 export const login = createAsyncThunk(
   'auth/login',
-  async (credentials: { email: string; password: string }, { rejectWithValue }) => {
+  async (credentials: { email: string; password: string }, { rejectWithValue, dispatch }) => {
     try {
       const response = await authApi.login(credentials);
-      return response.data.data;
+      const { accessToken, refreshToken } = response.data.data;
+      
+      // Store tokens
+      cookieService.setAccessToken(accessToken);
+      storageService.setRefreshToken(refreshToken);
+      
+      // Fetch user profile
+      const profileResponse = await authApi.getProfile();
+      const userData = profileResponse.data.data;
+      
+      // Store user data
+      storageService.setUserData(userData.user, userData.organization);
+      
+      return {
+        accessToken,
+        refreshToken,
+        user: userData.user,
+        organization: userData.organization,
+      };
     } catch (error: any) {
       return rejectWithValue(error.response?.data?.message || 'Login failed');
     }
@@ -56,7 +76,21 @@ export const signup = createAsyncThunk(
           name: data.organizationName,
         },
       });
-      return response.data.data;
+      const { user, organization, tokens } = response.data.data;
+      
+      // Store tokens
+      cookieService.setAccessToken(tokens.accessToken);
+      storageService.setRefreshToken(tokens.refreshToken);
+      
+      // Store user data
+      storageService.setUserData(user, organization);
+      
+      return {
+        user,
+        organization,
+        accessToken: tokens.accessToken,
+        refreshToken: tokens.refreshToken,
+      };
     } catch (error: any) {
       return rejectWithValue(error.response?.data?.message || 'Signup failed');
     }
@@ -65,23 +99,61 @@ export const signup = createAsyncThunk(
 
 export const refreshToken = createAsyncThunk(
   'auth/refreshToken',
-  async (refreshToken: string, { rejectWithValue }) => {
+  async (_, { rejectWithValue }) => {
     try {
-      const response = await authApi.refreshToken({ refreshToken });
-      return response.data.data;
+      const storedRefreshToken = storageService.getRefreshToken();
+      if (!storedRefreshToken) {
+        return rejectWithValue('No refresh token available');
+      }
+      const response = await authApi.refreshToken({ refreshToken: storedRefreshToken });
+      const { accessToken, refreshToken } = response.data.data;
+      
+      // Update tokens in storage
+      cookieService.setAccessToken(accessToken);
+      storageService.setRefreshToken(refreshToken);
+      
+      return { accessToken, refreshToken };
     } catch (error: any) {
       return rejectWithValue(error.response?.data?.message || 'Token refresh failed');
     }
   }
 );
 
+export const fetchProfile = createAsyncThunk(
+  'auth/fetchProfile',
+  async (_, { rejectWithValue }) => {
+    try {
+      const response = await authApi.getProfile();
+      const userData = response.data.data;
+      
+      // Update user data in storage
+      storageService.setUserData(userData.user, userData.organization);
+      
+      return {
+        user: userData.user,
+        organization: userData.organization,
+      };
+    } catch (error: any) {
+      return rejectWithValue(error.response?.data?.message || 'Failed to fetch profile');
+    }
+  }
+);
+
 export const logout = createAsyncThunk(
   'auth/logout',
-  async (refreshToken: string, { rejectWithValue }) => {
+  async (_, { rejectWithValue }) => {
     try {
-      await authApi.logout(refreshToken);
+      const refreshToken = storageService.getRefreshToken();
+      if (refreshToken) {
+        await authApi.logout(refreshToken);
+      }
     } catch (error: any) {
       return rejectWithValue(error.response?.data?.message || 'Logout failed');
+    } finally {
+      // Clear storage regardless of API call success
+      cookieService.removeAccessToken();
+      storageService.removeRefreshToken();
+      storageService.removeUserData();
     }
   }
 );
@@ -137,6 +209,8 @@ const authSlice = createSlice({
         state.isAuthenticated = true;
         state.token = action.payload.accessToken;
         state.refreshToken = action.payload.refreshToken;
+        state.user = action.payload.user;
+        state.organization = action.payload.organization;
         state.error = null;
       })
       .addCase(login.rejected, (state, action) => {
@@ -152,8 +226,8 @@ const authSlice = createSlice({
         state.isAuthenticated = true;
         state.user = action.payload.user;
         state.organization = action.payload.organization;
-        state.token = action.payload.tokens.accessToken;
-        state.refreshToken = action.payload.tokens.refreshToken;
+        state.token = action.payload.accessToken;
+        state.refreshToken = action.payload.refreshToken;
         state.error = null;
       })
       .addCase(signup.rejected, (state, action) => {
@@ -175,6 +249,18 @@ const authSlice = createSlice({
         state.organization = null;
         state.token = null;
         state.refreshToken = null;
+      })
+      .addCase(fetchProfile.pending, (state) => {
+        state.loading = true;
+      })
+      .addCase(fetchProfile.fulfilled, (state, action) => {
+        state.loading = false;
+        state.user = action.payload.user;
+        state.organization = action.payload.organization;
+      })
+      .addCase(fetchProfile.rejected, (state, action) => {
+        state.loading = false;
+        state.error = action.payload as string;
       })
       .addCase(logout.fulfilled, (state) => {
         state.isAuthenticated = false;

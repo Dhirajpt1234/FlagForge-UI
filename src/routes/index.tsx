@@ -1,6 +1,7 @@
 import React, { Suspense, lazy } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { Box, CircularProgress } from '@mui/material';
+import ProtectedRoute from '../components/ProtectedRoute';
 
 const Auth = lazy(() => import('../pages/Auth'));
 const Dashboard = lazy(() => import('../pages/Dashboard'));
@@ -27,7 +28,14 @@ const AppRoutes: React.FC = () => {
           <Route path="/" element={<Auth />} />
           <Route path="/login" element={<Auth />} />
           <Route path="/forgot-password" element={<ForgotPassword />} />
-          <Route path="/dashboard" element={<Dashboard />} />
+          <Route
+            path="/dashboard"
+            element={
+              <ProtectedRoute>
+                <Dashboard />
+              </ProtectedRoute>
+            }
+          />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </Suspense>
