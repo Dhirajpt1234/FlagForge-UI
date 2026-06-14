@@ -1,11 +1,15 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { Box, Drawer, Avatar, Typography } from '@mui/material';
 import { useNavigate, useLocation } from 'react-router-dom';
+import { useDispatch, useSelector } from 'react-redux';
 import FlagForgeLogo from '../common/FlagForgeLogo';
 import NavigationSection, { NavigationItem } from './NavigationSection';
 import UserProfileSection, { UserInfo, Organization } from './UserProfileSection';
 import OrganizationSwitcher from './OrganizationSwitcher';
 import { menuConfig, filterMenuByPermissions, UserPermissions, MenuItem } from '../../config/menuConfig';
+import { RootState } from '../../redux/store';
+import { getUserOrganizations, createOrganization, switchOrganization, logout } from '../../redux/slices/authSlice';
+import type { AppDispatch } from '../../redux/store';
 
 export interface SidebarProps {
   collapsed: boolean;
@@ -16,8 +20,20 @@ export interface SidebarProps {
 const Sidebar: React.FC<SidebarProps> = ({ collapsed, onToggleCollapse, userPermissions }) => {
   const navigate = useNavigate();
   const location = useLocation();
+  const dispatch = useDispatch<AppDispatch>();
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({});
   const [orgSwitcherOpen, setOrgSwitcherOpen] = useState(false);
+
+  const user = useSelector((state: RootState) => state.auth.user);
+  const organization = useSelector((state: RootState) => state.auth.organization);
+  const organizations = useSelector((state: RootState) => state.auth.organizations);
+  const isLoading = useSelector((state: RootState) => state.auth.loading);
+
+  useEffect(() => {
+    if (user && organizations.length === 0) {
+      dispatch(getUserOrganizations());
+    }
+  }, [user?.id, organizations.length, dispatch]);
 
   const filteredMenuConfig = useMemo(() => {
     if (userPermissions) {
@@ -31,7 +47,8 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed, onToggleCollapse, userPerm
   };
 
   const handleSignOut = () => {
-    console.log('Sign out clicked');
+    dispatch(logout());
+    navigate('/auth');
   };
 
   const handleSwitchOrganization = () => {
@@ -39,7 +56,12 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed, onToggleCollapse, userPerm
   };
 
   const handleOrgSwitch = (orgId: string) => {
-    console.log('Switching to organization:', orgId);
+    dispatch(switchOrganization(orgId));
+  };
+
+  const handleCreateOrganization = async (name: string) => {
+    const slug = name.toLowerCase().replace(/ /g, '-');
+    await dispatch(createOrganization({ name, slug }));
   };
 
   const handleToggleSection = (sectionId: string) => {
@@ -58,31 +80,34 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed, onToggleCollapse, userPerm
     };
   };
 
-  const mockUser: UserInfo = {
-    name: 'Ada Lovelace',
-    email: 'ada@acmecorp.com',
-    initials: 'AL',
+  const getInitials = (name: string): string => {
+    return name
+      .split(' ')
+      .map((n) => n[0])
+      .join('')
+      .toUpperCase()
+      .slice(0, 2);
   };
 
-  const mockOrganizations: Organization[] = [
-    {
-      id: '1',
-      name: 'Acme Corp',
-      initials: 'AC',
-    },
-    {
-      id: '2',
-      name: 'Tech Startup',
-      initials: 'TS',
-    },
-    {
-      id: '3',
-      name: 'Enterprise Inc',
-      initials: 'EI',
-    },
-  ];
+  const userInfo: UserInfo = user
+    ? {
+        name: `${user.firstName} ${user.lastName}`,
+        email: user.email,
+        initials: getInitials(`${user.firstName} ${user.lastName}`),
+      }
+    : {
+        name: 'Loading...',
+        email: '',
+        initials: '...',
+      };
 
-  const currentOrgId = '1';
+  const orgList: Organization[] = organizations.map((org) => ({
+    id: org.id,
+    name: org.name,
+    initials: getInitials(org.name),
+  }));
+
+  const currentOrgId = organization?.id || '';
 
   return (
     <>
@@ -135,7 +160,7 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed, onToggleCollapse, userPerm
                   fontWeight: 600,
                 }}
               >
-                {mockOrganizations.find((org) => org.id === currentOrgId)?.initials || 'AC'}
+                {orgList.find((org) => org.id === currentOrgId)?.initials || '...'}
               </Avatar>
               {!collapsed && (
                 <Typography
@@ -146,7 +171,7 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed, onToggleCollapse, userPerm
                     fontSize: '0.875rem',
                   }}
                 >
-                  Acme Corp
+                  {organization?.name || 'Loading...'}
                 </Typography>
               )}
             </Box>
@@ -192,8 +217,8 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed, onToggleCollapse, userPerm
           </Box>
 
           <UserProfileSection
-            user={mockUser}
-            organizations={mockOrganizations}
+            user={userInfo}
+            organizations={orgList}
             collapsed={collapsed}
             onSignOut={handleSignOut}
             onSwitchOrganization={handleSwitchOrganization}
@@ -204,9 +229,11 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed, onToggleCollapse, userPerm
       <OrganizationSwitcher
         open={orgSwitcherOpen}
         onClose={() => setOrgSwitcherOpen(false)}
-        organizations={mockOrganizations}
+        organizations={orgList}
         currentOrgId={currentOrgId}
         onSwitch={handleOrgSwitch}
+        onCreateOrganization={handleCreateOrganization}
+        isLoading={isLoading}
       />
     </>
   );

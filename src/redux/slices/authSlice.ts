@@ -1,13 +1,15 @@
 import { createSlice, createAsyncThunk } from '@reduxjs/toolkit';
 import { authApi } from '../../services/authApi';
-import { storageService } from '../../services/storageService';
-import { cookieService } from '../../services/cookieService';
+import { organizationApi } from '../../services/organizationApi';
+import { userStorage, organizationStorage, cookieStorage } from '../../services/storage';
 import type { User, Organization } from '../../types';
+import type { OrganizationListResponse } from '../../services/organizationApi';
 
 interface AuthState {
   isAuthenticated: boolean;
   user: User | null;
   organization: Organization | null;
+  organizations: OrganizationListResponse[];
   token: string | null;
   refreshToken: string | null;
   loading: boolean;
@@ -18,6 +20,7 @@ const initialState: AuthState = {
   isAuthenticated: false,
   user: null,
   organization: null,
+  organizations: [],
   token: null,
   refreshToken: null,
   loading: false,
@@ -30,23 +33,28 @@ export const login = createAsyncThunk(
     try {
       const response = await authApi.login(credentials);
       const { accessToken, refreshToken } = response.data.data;
-      
+
+      console.log("user logged in");
+
       // Store tokens
-      cookieService.setAccessToken(accessToken);
-      storageService.setRefreshToken(refreshToken);
-      
-      // Fetch user profile
+      cookieStorage.setAccessToken(accessToken);
+      cookieStorage.setRefreshToken(refreshToken);
+
+      // Fetch user profile after login
       const profileResponse = await authApi.getProfile();
       const userData = profileResponse.data.data;
-      
-      // Store user data
-      storageService.setUserData(userData.user, userData.organization);
-      
+
+      console.log("user data:", userData);
+
+      // Store user data in localStorage
+      userStorage.setUserData(userData);
+      organizationStorage.setOrganization(null);
+
       return {
         accessToken,
         refreshToken,
-        user: userData.user,
-        organization: userData.organization,
+        user: userData,
+        organization: null,
       };
     } catch (error: any) {
       return rejectWithValue(error.response?.data?.message || 'Login failed');
@@ -79,11 +87,12 @@ export const signup = createAsyncThunk(
       const { user, organization, tokens } = response.data.data;
       
       // Store tokens
-      cookieService.setAccessToken(tokens.accessToken);
-      storageService.setRefreshToken(tokens.refreshToken);
+      cookieStorage.setAccessToken(tokens.accessToken);
+      cookieStorage.setRefreshToken(tokens.refreshToken);
       
       // Store user data
-      storageService.setUserData(user, organization);
+      userStorage.setUserData(user);
+      organizationStorage.setOrganization(organization);
       
       return {
         user,
@@ -101,7 +110,7 @@ export const refreshToken = createAsyncThunk(
   'auth/refreshToken',
   async (_, { rejectWithValue }) => {
     try {
-      const storedRefreshToken = storageService.getRefreshToken();
+      const storedRefreshToken = cookieStorage.getRefreshToken();
       if (!storedRefreshToken) {
         return rejectWithValue('No refresh token available');
       }
@@ -109,8 +118,8 @@ export const refreshToken = createAsyncThunk(
       const { accessToken, refreshToken } = response.data.data;
       
       // Update tokens in storage
-      cookieService.setAccessToken(accessToken);
-      storageService.setRefreshToken(refreshToken);
+      cookieStorage.setAccessToken(accessToken);
+      cookieStorage.setRefreshToken(refreshToken);
       
       return { accessToken, refreshToken };
     } catch (error: any) {
@@ -127,7 +136,8 @@ export const fetchProfile = createAsyncThunk(
       const userData = response.data.data;
       
       // Update user data in storage
-      storageService.setUserData(userData.user, userData.organization);
+      userStorage.setUserData(userData);
+      // organizationStorage.setOrganization(userData.organization);
       
       return {
         user: userData.user,
@@ -143,7 +153,7 @@ export const logout = createAsyncThunk(
   'auth/logout',
   async (_, { rejectWithValue }) => {
     try {
-      const refreshToken = storageService.getRefreshToken();
+      const refreshToken = cookieStorage.getRefreshToken();
       if (refreshToken) {
         await authApi.logout(refreshToken);
       }
@@ -151,9 +161,10 @@ export const logout = createAsyncThunk(
       return rejectWithValue(error.response?.data?.message || 'Logout failed');
     } finally {
       // Clear storage regardless of API call success
-      cookieService.removeAccessToken();
-      storageService.removeRefreshToken();
-      storageService.removeUserData();
+      cookieStorage.removeAccessToken();
+      cookieStorage.removeRefreshToken();
+      userStorage.removeUserData();
+      organizationStorage.removeOrganization();
     }
   }
 );
@@ -182,6 +193,30 @@ export const resetPassword = createAsyncThunk(
   }
 );
 
+export const getUserOrganizations = createAsyncThunk(
+  'auth/getUserOrganizations',
+  async (_, { rejectWithValue }) => {
+    try {
+      const response = await organizationApi.getUserOrganizations();
+      return response.data.data;
+    } catch (error: any) {
+      return rejectWithValue(error.response?.data?.message || 'Failed to fetch organizations');
+    }
+  }
+);
+
+export const createOrganization = createAsyncThunk(
+  'auth/createOrganization',
+  async (data: { name: string; slug?: string }, { rejectWithValue }) => {
+    try {
+      const response = await organizationApi.createOrganization(data);
+      return response.data.data;
+    } catch (error: any) {
+      return rejectWithValue(error.response?.data?.message || 'Failed to create organization');
+    }
+  }
+);
+
 const authSlice = createSlice({
   name: 'auth',
   initialState,
@@ -193,9 +228,30 @@ const authSlice = createSlice({
       state.isAuthenticated = false;
       state.user = null;
       state.organization = null;
+      state.organizations = [];
       state.token = null;
       state.refreshToken = null;
       state.error = null;
+    },
+    setUserFromStorage: (state, action) => {
+      state.user = action.payload.user;
+      state.organization = action.payload.organization;
+      state.isAuthenticated = true;
+    },
+    switchOrganization: (state, action) => {
+      const orgId = action.payload;
+      const selectedOrg = state.organizations.find((org) => org.id === orgId);
+      if (selectedOrg) {
+        state.organization = {
+          id: selectedOrg.id,
+          name: selectedOrg.name,
+          slug: selectedOrg.slug,
+        };
+        if (state.user) {
+          userStorage.setUserData(state.user);
+          organizationStorage.setOrganization(state.organization);
+        }
+      }
     },
   },
   extraReducers: (builder) => {
@@ -292,9 +348,48 @@ const authSlice = createSlice({
       .addCase(resetPassword.rejected, (state, action) => {
         state.loading = false;
         state.error = action.payload as string;
+      })
+      .addCase(getUserOrganizations.pending, (state) => {
+        state.loading = true;
+        state.error = null;
+      })
+      .addCase(getUserOrganizations.fulfilled, (state, action) => {
+        state.loading = false;
+        state.organizations = action.payload;
+      })
+      .addCase(getUserOrganizations.rejected, (state, action) => {
+        state.loading = false;
+        state.error = action.payload as string;
+      })
+      .addCase(createOrganization.pending, (state) => {
+        state.loading = true;
+        state.error = null;
+      })
+      .addCase(createOrganization.fulfilled, (state, action) => {
+        state.loading = false;
+        state.organizations.push({
+          id: action.payload.id,
+          name: action.payload.name,
+          slug: action.payload.slug,
+          role: 'OWNER',
+          createdAt: action.payload.createdAt,
+        });
+        state.organization = {
+          id: action.payload.id,
+          name: action.payload.name,
+          slug: action.payload.slug,
+        };
+        if (state.user) {
+          userStorage.setUserData(state.user);
+          organizationStorage.setOrganization(state.organization);
+        }
+      })
+      .addCase(createOrganization.rejected, (state, action) => {
+        state.loading = false;
+        state.error = action.payload as string;
       });
   },
 });
 
-export const { clearError, logoutSuccess } = authSlice.actions;
+export const { clearError, logoutSuccess, switchOrganization, setUserFromStorage } = authSlice.actions;
 export default authSlice.reducer;

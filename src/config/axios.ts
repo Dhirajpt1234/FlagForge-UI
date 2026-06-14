@@ -1,8 +1,7 @@
 import axios, { AxiosInstance, AxiosError, InternalAxiosRequestConfig, AxiosResponse } from 'axios';
 import { AUTH_ROUTES } from './authRoutes';
 import { Service, getServiceBaseUrl } from './serviceConfig';
-import { cookieService } from '../services/cookieService';
-import { storageService } from '../services/storageService';
+import { cookieStorage, userStorage } from '../services/storage';
 
 const API_BASE_URL = getServiceBaseUrl(Service.AUTH);
 
@@ -28,7 +27,7 @@ const onRefreshed = (token: string) => {
 
 axiosInstance.interceptors.request.use(
   (config: InternalAxiosRequestConfig) => {
-    const token = cookieService.getAccessToken();
+    const token = cookieStorage.getAccessToken();
     if (token && config.headers) {
       config.headers.Authorization = `Bearer ${token}`;
     }
@@ -61,12 +60,12 @@ axiosInstance.interceptors.response.use(
       originalRequest._retry = true;
       isRefreshing = true;
 
-      const refreshToken = storageService.getRefreshToken();
+      const refreshToken = cookieStorage.getRefreshToken();
 
       if (!refreshToken) {
-        cookieService.removeAccessToken();
-        storageService.removeRefreshToken();
-        storageService.removeUserData();
+        cookieStorage.removeAccessToken();
+        cookieStorage.removeRefreshToken();
+        userStorage.removeUserData();
         window.location.href = '/login';
         return Promise.reject(error);
       }
@@ -78,8 +77,8 @@ axiosInstance.interceptors.response.use(
 
         const { accessToken, refreshToken: newRefreshToken } = response.data.data;
 
-        cookieService.setAccessToken(accessToken);
-        storageService.setRefreshToken(newRefreshToken);
+        cookieStorage.setAccessToken(accessToken);
+        cookieStorage.setRefreshToken(newRefreshToken);
 
         onRefreshed(accessToken);
 
@@ -89,9 +88,9 @@ axiosInstance.interceptors.response.use(
 
         return axiosInstance(originalRequest);
       } catch (refreshError) {
-        cookieService.removeAccessToken();
-        storageService.removeRefreshToken();
-        storageService.removeUserData();
+        cookieStorage.removeAccessToken();
+        cookieStorage.removeRefreshToken();
+        userStorage.removeUserData();
         window.location.href = '/login';
         return Promise.reject(refreshError);
       } finally {
